@@ -1,0 +1,357 @@
+# PIPELINE DEFINITION
+# Name: iris-training-pipeline
+# Description: An ML pipeline for data preparation, train/test splitting, model training, performance evaluation, and inference.
+# Inputs:
+#    drop_missing_vals: bool [Default: True]
+#    n_estimators: int [Default: 100.0]
+#    random_state: int [Default: 42.0]
+#    test_size: float [Default: 0.25]
+components:
+  comp-check-model-performance:
+    executorLabel: exec-check-model-performance
+    inputDefinitions:
+      artifacts:
+        X_test:
+          artifactType:
+            schemaTitle: system.Dataset
+            schemaVersion: 0.0.1
+        model_path:
+          artifactType:
+            schemaTitle: system.Model
+            schemaVersion: 0.0.1
+        y_test:
+          artifactType:
+            schemaTitle: system.Dataset
+            schemaVersion: 0.0.1
+    outputDefinitions:
+      artifacts:
+        metrics_data:
+          artifactType:
+            schemaTitle: system.Dataset
+            schemaVersion: 0.0.1
+  comp-create-dataset:
+    executorLabel: exec-create-dataset
+    inputDefinitions:
+      parameters:
+        drop_missing_vals:
+          parameterType: BOOLEAN
+    outputDefinitions:
+      artifacts:
+        iris_dataset:
+          artifactType:
+            schemaTitle: system.Dataset
+            schemaVersion: 0.0.1
+  comp-train-test-splitting:
+    executorLabel: exec-train-test-splitting
+    inputDefinitions:
+      artifacts:
+        input_iris_dataset:
+          artifactType:
+            schemaTitle: system.Dataset
+            schemaVersion: 0.0.1
+      parameters:
+        random_state:
+          parameterType: NUMBER_INTEGER
+        test_size:
+          parameterType: NUMBER_DOUBLE
+    outputDefinitions:
+      artifacts:
+        X_test:
+          artifactType:
+            schemaTitle: system.Dataset
+            schemaVersion: 0.0.1
+        X_train:
+          artifactType:
+            schemaTitle: system.Dataset
+            schemaVersion: 0.0.1
+        y_test:
+          artifactType:
+            schemaTitle: system.Dataset
+            schemaVersion: 0.0.1
+        y_train:
+          artifactType:
+            schemaTitle: system.Dataset
+            schemaVersion: 0.0.1
+  comp-training-classifier-model:
+    executorLabel: exec-training-classifier-model
+    inputDefinitions:
+      artifacts:
+        X_train:
+          artifactType:
+            schemaTitle: system.Dataset
+            schemaVersion: 0.0.1
+        y_train:
+          artifactType:
+            schemaTitle: system.Dataset
+            schemaVersion: 0.0.1
+      parameters:
+        n_estimators:
+          parameterType: NUMBER_INTEGER
+        random_state:
+          parameterType: NUMBER_INTEGER
+    outputDefinitions:
+      artifacts:
+        save_model:
+          artifactType:
+            schemaTitle: system.Model
+            schemaVersion: 0.0.1
+deploymentSpec:
+  executors:
+    exec-check-model-performance:
+      container:
+        args:
+        - --executor_input
+        - '{{$}}'
+        - --function_to_execute
+        - check_model_performance
+        command:
+        - sh
+        - -c
+        - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
+          \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
+          \ python3 -m pip install --quiet --no-warn-script-location 'kfp==2.12.1'\
+          \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"'  &&\
+          \  python3 -m pip install --quiet --no-warn-script-location 'pandas' 'numpy'\
+          \ 'scikit-learn' && \"$0\" \"$@\"\n"
+        - sh
+        - -ec
+        - 'program_path=$(mktemp -d)
+
+
+          printf "%s" "$0" > "$program_path/ephemeral_component.py"
+
+          _KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         "$program_path/ephemeral_component.py"                         "$@"
+
+          '
+        - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
+          \ *\n\ndef check_model_performance(\n    X_test: Input[Dataset],\n    y_test:\
+          \ Input[Dataset],\n    model_path: Input[Model],\n    metrics_data: Output[Dataset]\n\
+          ):\n    import numpy as np\n    import pandas as pd\n    import joblib\n\
+          \    from sklearn.metrics import accuracy_score, f1_score, precision_score,\
+          \ recall_score\n\n    X_test_data = pd.read_csv(X_test.path)\n    y_test_data\
+          \ = pd.read_csv(y_test.path)\n\n    model = joblib.load(model_path.path)\n\
+          \    y_pred = model.predict(X_test_data)\n\n    acc = accuracy_score(y_test_data,\
+          \ y_pred)\n    f1 = f1_score(y_test_data, y_pred, average='weighted')\n\
+          \    prec = precision_score(y_test_data, y_pred, average='weighted')\n \
+          \   rec = recall_score(y_test_data, y_pred, average='weighted')\n\n    metrics_df\
+          \ = pd.DataFrame({'Accuracy': [acc],\n                               'F1-score':\
+          \ [f1],\n                               'Precision': [prec],\n         \
+          \                      'Recall': [rec]})\n\n    with open(metrics_data.path,\
+          \ 'w') as file:\n        metrics_df.to_csv(file, index=False)\n\n"
+        image: python:3.10-slim
+    exec-create-dataset:
+      container:
+        args:
+        - --executor_input
+        - '{{$}}'
+        - --function_to_execute
+        - create_dataset
+        command:
+        - sh
+        - -c
+        - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
+          \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
+          \ python3 -m pip install --quiet --no-warn-script-location 'kfp==2.12.1'\
+          \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"'  &&\
+          \  python3 -m pip install --quiet --no-warn-script-location 'pandas' 'numpy'\
+          \ 'scikit-learn' && \"$0\" \"$@\"\n"
+        - sh
+        - -ec
+        - 'program_path=$(mktemp -d)
+
+
+          printf "%s" "$0" > "$program_path/ephemeral_component.py"
+
+          _KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         "$program_path/ephemeral_component.py"                         "$@"
+
+          '
+        - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
+          \ *\n\ndef create_dataset(drop_missing_vals: bool, iris_dataset: Output[Dataset]):\n\
+          \    import pandas as pd\n    from sklearn import datasets\n\n    # Load\
+          \ dataset\n    iris = datasets.load_iris()\n    df = pd.DataFrame(iris.data,\
+          \ columns=iris.feature_names)\n    df['species'] = iris.target\n\n    if\
+          \ drop_missing_vals:\n        df = df.dropna()\n\n    with open(iris_dataset.path,\
+          \ 'w') as file:\n        df.to_csv(file, index=False)\n\n"
+        image: python:3.10-slim
+    exec-train-test-splitting:
+      container:
+        args:
+        - --executor_input
+        - '{{$}}'
+        - --function_to_execute
+        - train_test_splitting
+        command:
+        - sh
+        - -c
+        - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
+          \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
+          \ python3 -m pip install --quiet --no-warn-script-location 'kfp==2.12.1'\
+          \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"'  &&\
+          \  python3 -m pip install --quiet --no-warn-script-location 'pandas' 'numpy'\
+          \ 'scikit-learn' && \"$0\" \"$@\"\n"
+        - sh
+        - -ec
+        - 'program_path=$(mktemp -d)
+
+
+          printf "%s" "$0" > "$program_path/ephemeral_component.py"
+
+          _KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         "$program_path/ephemeral_component.py"                         "$@"
+
+          '
+        - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
+          \ *\n\ndef train_test_splitting(\n    input_iris_dataset: Input[Dataset],\
+          \ \n    X_train: Output[Dataset], \n    X_test: Output[Dataset], \n    y_train:\
+          \ Output[Dataset], \n    y_test: Output[Dataset],\n    test_size: float,\n\
+          \    random_state: int,\n):\n    import numpy as np\n    import pandas as\
+          \ pd\n    from sklearn.model_selection import train_test_split\n\n    with\
+          \ open(input_iris_dataset.path) as file:\n        df = pd.read_csv(file)\n\
+          \n    X = df.drop(['species'], axis=1)\n    y = df[['species']]\n\n    X_train_data,\
+          \ X_test_data, y_train_data, y_test_data = train_test_split(X, y, test_size=test_size,\
+          \ stratify=y, random_state=random_state)\n\n    X_train_data.to_csv(X_train.path,\
+          \ index=False)\n    X_test_data.to_csv(X_test.path, index=False)\n    y_train_data.to_csv(y_train.path,\
+          \ index=False)\n    y_test_data.to_csv(y_test.path, index=False)\n\n"
+        image: python:3.10-slim
+    exec-training-classifier-model:
+      container:
+        args:
+        - --executor_input
+        - '{{$}}'
+        - --function_to_execute
+        - training_classifier_model
+        command:
+        - sh
+        - -c
+        - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
+          \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
+          \ python3 -m pip install --quiet --no-warn-script-location 'kfp==2.12.1'\
+          \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"'  &&\
+          \  python3 -m pip install --quiet --no-warn-script-location 'pandas' 'numpy'\
+          \ 'scikit-learn' && \"$0\" \"$@\"\n"
+        - sh
+        - -ec
+        - 'program_path=$(mktemp -d)
+
+
+          printf "%s" "$0" > "$program_path/ephemeral_component.py"
+
+          _KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         "$program_path/ephemeral_component.py"                         "$@"
+
+          '
+        - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
+          \ *\n\ndef training_classifier_model(\n    X_train: Input[Dataset],\n  \
+          \  y_train: Input[Dataset],\n    save_model: Output[Model],\n    n_estimators:\
+          \ int,\n    random_state: int,\n):\n    import numpy as np\n    import pandas\
+          \ as pd\n    from sklearn.ensemble import RandomForestClassifier\n    import\
+          \ pickle\n\n    X_train_data = pd.read_csv(X_train.path)\n    y_train_data\
+          \ = pd.read_csv(y_train.path)\n\n    model = RandomForestClassifier(n_estimators=n_estimators,\
+          \ random_state=random_state)\n    model.fit(X_train_data, y_train_data['species'].values)\n\
+          \n    with open(save_model.path, 'wb') as file:\n        pickle.dump(model,\
+          \ file)\n\n"
+        image: python:3.10-slim
+pipelineInfo:
+  description: An ML pipeline for data preparation, train/test splitting, model training,
+    performance evaluation, and inference.
+  name: iris-training-pipeline
+root:
+  dag:
+    tasks:
+      check-model-performance:
+        cachingOptions:
+          enableCache: true
+        componentRef:
+          name: comp-check-model-performance
+        dependentTasks:
+        - train-test-splitting
+        - training-classifier-model
+        inputs:
+          artifacts:
+            X_test:
+              taskOutputArtifact:
+                outputArtifactKey: X_test
+                producerTask: train-test-splitting
+            model_path:
+              taskOutputArtifact:
+                outputArtifactKey: save_model
+                producerTask: training-classifier-model
+            y_test:
+              taskOutputArtifact:
+                outputArtifactKey: y_test
+                producerTask: train-test-splitting
+        taskInfo:
+          name: check-model-performance
+      create-dataset:
+        cachingOptions:
+          enableCache: true
+        componentRef:
+          name: comp-create-dataset
+        inputs:
+          parameters:
+            drop_missing_vals:
+              componentInputParameter: drop_missing_vals
+        taskInfo:
+          name: create-dataset
+      train-test-splitting:
+        cachingOptions:
+          enableCache: true
+        componentRef:
+          name: comp-train-test-splitting
+        dependentTasks:
+        - create-dataset
+        inputs:
+          artifacts:
+            input_iris_dataset:
+              taskOutputArtifact:
+                outputArtifactKey: iris_dataset
+                producerTask: create-dataset
+          parameters:
+            random_state:
+              componentInputParameter: random_state
+            test_size:
+              componentInputParameter: test_size
+        taskInfo:
+          name: train-test-splitting
+      training-classifier-model:
+        cachingOptions:
+          enableCache: true
+        componentRef:
+          name: comp-training-classifier-model
+        dependentTasks:
+        - train-test-splitting
+        inputs:
+          artifacts:
+            X_train:
+              taskOutputArtifact:
+                outputArtifactKey: X_train
+                producerTask: train-test-splitting
+            y_train:
+              taskOutputArtifact:
+                outputArtifactKey: y_train
+                producerTask: train-test-splitting
+          parameters:
+            n_estimators:
+              componentInputParameter: n_estimators
+            random_state:
+              componentInputParameter: random_state
+        taskInfo:
+          name: training-classifier-model
+  inputDefinitions:
+    parameters:
+      drop_missing_vals:
+        defaultValue: true
+        isOptional: true
+        parameterType: BOOLEAN
+      n_estimators:
+        defaultValue: 100.0
+        isOptional: true
+        parameterType: NUMBER_INTEGER
+      random_state:
+        defaultValue: 42.0
+        isOptional: true
+        parameterType: NUMBER_INTEGER
+      test_size:
+        defaultValue: 0.25
+        isOptional: true
+        parameterType: NUMBER_DOUBLE
+schemaVersion: 2.1.0
+sdkVersion: kfp-2.12.1
